@@ -1,0 +1,4 @@
+node_modules/
+original_now_backup.js
+.env
+package-lock.json
