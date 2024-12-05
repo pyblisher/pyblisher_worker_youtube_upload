@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const { createClient } = require('@supabase/supabase-js');
 const { upload } = require('youtube-videos-uploader'); // vanilla javascript
+const { comment } = require('youtube-videos-uploader');
 const fs = require('fs');
 const axios = require('axios');
 const path = require('path');
@@ -13,6 +14,9 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 const workdir = process.env.WORK_DIR;
 const supabase = createClient(supabaseUrl, supabaseKey);
+let videoProcessingId; // Declare a variable for video processing ID
+
+
 
 puppeteer.use(StealthPlugin());
 
@@ -31,6 +35,24 @@ const launchOptions = {
         '--enable-features=NetworkService,NetworkServiceInProcess'
     ],
 };
+
+
+async function fetchDescription(videoId) {
+    try {
+        const { data: youtubeDescription, error: descriptionError } = await supabase
+            .from('youtube_video')
+            .select('youtube_description')
+            .eq('id', videoId)
+            .single();
+
+        if (descriptionError) throw descriptionError;
+
+        return youtubeDescription || null;
+    } catch (error) {
+        console.error('Error fetching data:', error.message);
+        return null; // Return null in case of an error
+    }
+}
 
 // Function to fetch channel credentials based on channel ID
 async function fetchData(channelId) {
@@ -51,13 +73,16 @@ async function fetchData(channelId) {
 }
 
 // Function to handle actions on video upload success and update the youtube_video record
-const onVideoUploadSuccess = async (videoUrl, videoId) => {
+const onVideoUploadSuccess = async (videoUrl) => {
     console.log(`Video uploaded successfully! URL: ${videoUrl}`);
+    my_video_id=videoUrl
+    console.log("my video id" + my_video_id)
+    console.log("my videoProcessingId" + videoProcessingId)
 
     const { data, error } = await supabase
         .from('youtube_video')
-        .update({ youtube_id: videoUrl }) // Assuming youtube_id is where you want to store the video_url
-        .eq('id', videoId); // Use the video's unique ID to identify which record to update
+        .update({ youtube_id: my_video_id }) // Assuming youtube_id is where you want to store the video_url
+        .eq('id', videoProcessingId); // Use the video's unique ID to identify which record to update
 
     if (error) {
         console.error('Error updating youtube_video record:', error.message);
@@ -97,68 +122,83 @@ function subscribeToNewVideos() {
                 const newVideo = payload.new; // Contains the new record data
                 console.log('New video added:', newVideo);
 
-                const { id, process_id, youtube_title, youtube_description, youtube_keywords,
+                const { id, process_id, youtube_title, youtube_keywords,
                         youtube_category, file_identifier, thumbnail_identifier,
-                        created_at, youtube_privacy_status, channel_id } = newVideo;
+                        created_at, youtube_privacy_status, channel_id, youtube_id} = newVideo;
 
-                console.log(`Video ID: ${id}`);
-                console.log(`Title: ${youtube_title}`);
-                console.log(`Description: ${youtube_description}`);
-                console.log(`Keywords: ${youtube_keywords}`);
-                console.log(`Category: ${youtube_category}`);
-                console.log(`File Identifier: ${file_identifier}`);
-                console.log(`Thumbnail Identifier: ${thumbnail_identifier}`);
-                console.log(`Created At: ${created_at}`);
+                videoProcessingId = id; // Update the variable directly
 
-                // Fetch the corresponding channel credentials using the channel_id
-                const channelCredentials = await fetchData(channel_id);
+                if(youtube_id != null) { console.log("id is not empty")}
+                else {
+                
+                    const getDescription = await fetchDescription(id);                    
+                    if(getDescription) {
+                        const { youtube_description } = getDescription;
 
-                if (channelCredentials) {
-                    const { user_login_email, user_password, user_recovery_email, name } = channelCredentials;
+                        console.log(`Video ID: ${id}`);
+                        console.log(`Title: ${youtube_title}`);
+                        console.log(`Description:  ${youtube_description}`);
+                        console.log(`Keywords: ${youtube_keywords}`);
+                        console.log(`Category: ${youtube_category}`);
+                        console.log(`File Identifier: ${file_identifier}`);
+                        console.log(`Thumbnail Identifier: ${thumbnail_identifier}`);
+                        console.log(`Created At: ${created_at}`);
 
-                    const credentials = {
-                        email: user_login_email || '',
-                        pass: user_password || '',
-                        recoveryemail: user_recovery_email || ''
-                    };
+                        // Fetch the corresponding channel credentials using the channel_id
+                        const channelCredentials = await fetchData(channel_id);
 
-                    console.log('Channel Credentials:', credentials);
+                        if (channelCredentials) {
+                            const { user_login_email, user_password, user_recovery_email, name } = channelCredentials;
 
-                    // Prepare for video upload
-                    const urlToDownload = newVideo.file_identifier; // URL of the file to download
-                    const tmp_path_to_video = path.join(workdir, `${newVideo.process_id}.mp4`); // Local path for saving
+                            const credentials = {
+                                email: user_login_email || '',
+                                pass: user_password || '',
+                                recoveryemail: user_recovery_email || ''
+                            };
 
-                    await download_file(urlToDownload, tmp_path_to_video); // Call download_file function
+                            console.log('Channel Credentials:', credentials);
 
-                    const tag_array = youtube_keywords.split(',');
-                    const videoAttributes = {
-                        path: tmp_path_to_video,
-                        title: youtube_title,
-                        description: youtube_description,
-                        language: 'english', // Adjust based on your logic
-                        tags: tag_array,
-                        playlist: '', // Adjust as necessary
-                        channelName: name,
-                        onSuccess: onVideoUploadSuccess,
-                        skipProcessingWait: true,
-                        onProgress: (progress) => { console.log('progress', progress); },
-                        uploadAsDraft: false,
-                        isAgeRestriction: false,
-                        isNotForKid: false,
-                        publishType: youtube_privacy_status.toUpperCase(),
-                        isChannelMonetized: false,
-                    };
+                            // Prepare for video upload
+                            const videoToDownload = newVideo.file_identifier; // URL of the file to download
+                            const thumbnailToDownload = newVideo.thumbnail_identifier; // URL of the file to download
+                            const tmp_path_to_video = path.join(workdir, `${newVideo.process_id}.mp4`); // Local path for saving
+                            const tmp_path_to_thumbnail = path.join(workdir, `${newVideo.process_id}.png`); // Local path for saving
 
-                    console.log('Submitting the metadata to upload:', videoAttributes);
-                    
-                    // Upload using youtube-video-uploader package
-                    //   upload(credentials, [videoAttributes], {headless:false})                 
-                    upload(credentials, [videoAttributes], launchOptions)                 
-                        .then(console.log)
-                        .catch(err => console.error("Upload failed:", err));
-                } else {
-                    console.log('No channel credentials found for the given channel ID.');
-                }
+                            await download_file(videoToDownload, tmp_path_to_video); // Call download_file function
+                            await download_file(thumbnailToDownload, tmp_path_to_thumbnail); // Call download_file function
+                            
+                            const tag_array = youtube_keywords.split(',');
+                            const videoAttributes = {
+                                path: tmp_path_to_video,
+                                title: youtube_title,
+                                description: youtube_description,
+        //                        language: 'english', // Adjust based on your logic
+                                tags: tag_array,
+        //                        playlist: '', // Adjust as necessary
+                                channelName: name,
+                                onSuccess: onVideoUploadSuccess,
+                                skipProcessingWait: false,
+                                onProgress: (progress) => { console.log('progress', progress); },
+                                uploadAsDraft: false,
+                                isAgeRestriction: false,
+//                                thumbnail: tmp_path_to_thumbnail,
+                                isNotForKid: true,
+                                publishType: youtube_privacy_status.toUpperCase(),
+        //                        isChannelMonetized: false,
+                            };
+
+                            console.log('Submitting the metadata to upload:', videoAttributes);
+                            
+                            // Upload using youtube-video-uploader package
+                            //   upload(credentials, [videoAttributes], {headless:false})                 
+                            upload(credentials, [videoAttributes], launchOptions)                 
+                                .then(console.log)
+                                .catch(err => console.error("Upload failed:", err));
+                        } else {
+                            console.log('No channel credentials found for the given channel ID.');
+                        }
+                    }
+                }                
             }
         )
         .subscribe((status) => {
