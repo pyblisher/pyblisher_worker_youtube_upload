@@ -1,3 +1,9 @@
+TO RUN ON WINDOWS:
+install node.js from https://nodejs.org/en/download/prebuilt-binaries
+install chromium browser from https://www.chromium.org/Home/
+
+TO RUN ON UBUNTU: PROBLEM _ UPLOAD DOES NOT WORK CORRECTLY _ NEED TO CHANGE THE SOURCE FILE OF youtube_uploader 
+
 sudo apt install nodejs
 sudo apt install npm
 sudo apt-get install chromium-browser
